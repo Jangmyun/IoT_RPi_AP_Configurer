@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
+from fastapi import BackgroundTasks
 
 from models import ConnectRequest, ConnectResponse, WiFiNetwork
 from wifi_connect import connect_to_ap
@@ -70,14 +71,33 @@ async def api_scan():
     return await _refresh_scan()
 
 
-@app.post("/api/connect", response_model=ConnectResponse)
-async def api_connect(body: ConnectRequest):
+_connect_result: ConnectResponse | None = None
+
+
+def _do_connect(ssid: str, password: str):
+    global _connect_result
     try:
-        result = await asyncio.to_thread(connect_to_ap, body.ssid, body.password)
+        _connect_result = connect_to_ap(ssid, password)
     except Exception as exc:
         log.exception("connect_to_ap raised unexpectedly")
-        raise HTTPException(status_code=500, detail=str(exc))
-    return result
+        _connect_result = ConnectResponse(
+            success=False, message=f"내부 오류: {exc}"
+        )
+
+
+@app.post("/api/connect")
+async def api_connect(body: ConnectRequest, background_tasks: BackgroundTasks):
+    global _connect_result
+    _connect_result = None
+    background_tasks.add_task(_do_connect, body.ssid, body.password)
+    return {"success": True, "message": "연결 시도 중...", "ip_address": None}
+
+
+@app.get("/api/connect_result")
+async def api_connect_result():
+    if _connect_result is None:
+        return {"pending": True}
+    return {"pending": False, **_connect_result.model_dump()}
 
 
 @app.get("/api/status")

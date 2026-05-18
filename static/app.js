@@ -40,27 +40,50 @@ function escHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-btnScan.addEventListener('click', async () => {
-  btnScan.disabled = true;
-  btnScan.textContent = '스캔 중…';
-  networkList.innerHTML = '<div class="empty">스캔 중입니다…</div>';
+btnConnect.addEventListener('click', async () => {
+  const password = modalPw.value;
+  btnConnect.disabled = true;
+  btnConnect.innerHTML = '<span class="spinner"></span>연결 중…';
+  setFeedback('연결 시도 중...', '');
 
   try {
-    const res = await fetch('/api/scan');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const networks = await res.json();
+    // 연결 요청 (즉시 응답 반환됨)
+    await fetch('/api/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ssid: selectedSsid, password }),
+    });
 
-    networkList.innerHTML = '';
-    if (networks.length === 0) {
-      networkList.innerHTML = '<div class="empty">주변 WiFi가 없습니다.</div>';
-    } else {
-      networks.forEach(net => networkList.appendChild(buildCard(net)));
+    // 결과 폴링 (최대 30초)
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        const res = await fetch('/api/connect_result');
+        const data = await res.json();
+        if (!data.pending) {
+          if (data.success) {
+            setFeedback(`✓ ${data.message}  IP: ${data.ip_address}`, 'success');
+            btnConnect.textContent = '완료';
+            refreshStatus();
+            setTimeout(closeModal, 2000);
+          } else {
+            setFeedback(`✗ ${data.message}`, 'error');
+            btnConnect.disabled = false;
+            btnConnect.textContent = '다시 시도';
+          }
+          return;
+        }
+      } catch (e) {
+        // 일시적 통신 끊김 무시
+      }
     }
+    setFeedback('연결 결과 확인 시간 초과', 'error');
+    btnConnect.disabled = false;
+    btnConnect.textContent = '다시 시도';
   } catch (e) {
-    networkList.innerHTML = `<div class="empty" style="color:var(--error)">스캔 실패: ${e.message}</div>`;
-  } finally {
-    btnScan.disabled = false;
-    btnScan.innerHTML = '&#x21BB; 스캔';
+    setFeedback(`네트워크 오류: ${e.message}`, 'error');
+    btnConnect.disabled = false;
+    btnConnect.textContent = '다시 시도';
   }
 });
 
