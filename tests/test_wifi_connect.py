@@ -13,7 +13,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from wifi_connect import connect_to_ap, _wpa_cli, _get_ip_address
+from src.wifi_connect import connect_to_ap, _wpa_cli, _get_ip_address
 
 INTERFACE = "wlan0"
 

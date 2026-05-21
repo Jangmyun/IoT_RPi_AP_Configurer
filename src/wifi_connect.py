@@ -2,7 +2,7 @@ import re
 import subprocess
 import time
 
-from models import ConnectResponse
+from .models import ConnectResponse
 
 INTERFACE = "wlan0"
 

@@ -7,7 +7,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from wifi_scan import scan_wifi
+from src.wifi_scan import scan_wifi
 
 SIGNAL_BARS = [
     (-50, "████ 매우 강함"),

@@ -12,14 +12,14 @@ from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 from fastapi import BackgroundTasks
 
-from models import ConnectRequest, ConnectResponse, WiFiNetwork
-from wifi_connect import connect_to_ap
-from wifi_scan import scan_wifi_async
+from .models import ConnectRequest, ConnectResponse, WiFiNetwork
+from .wifi_connect import connect_to_ap
+from .wifi_scan import scan_wifi_async
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
@@ -102,7 +102,7 @@ async def api_connect_result():
 
 @app.get("/api/status")
 async def api_status():
-    from wifi_connect import _wpa_cli, _get_ip_address
+    from .wifi_connect import _wpa_cli, _get_ip_address
     _, status = _wpa_cli("status")
     connected = "wpa_state=COMPLETED" in status
     ssid = None
@@ -118,4 +118,4 @@ async def api_status():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=80)
+    uvicorn.run("src.main:app", host="0.0.0.0", port=80)

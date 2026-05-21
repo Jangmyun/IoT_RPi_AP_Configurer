@@ -6,7 +6,7 @@ from typing import List
 from pyroute2.iwutil import AsyncIW
 from pyroute2.netlink.nl80211 import AsyncNL80211, NL80211_NAMES, nl80211cmd
 
-from models import WiFiNetwork
+from .models import WiFiNetwork
 
 log = logging.getLogger(__name__)
 
