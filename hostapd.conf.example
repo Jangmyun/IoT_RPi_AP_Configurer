@@ -1,7 +1,7 @@
 interface=ap0
 driver=nl80211
 
-ssid=IngyuChu
+ssid=your_name
 
 hw_mode=g
 channel=1
@@ -13,3 +13,4 @@ wpa=2
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 wpa_passphrase=00000000
+
