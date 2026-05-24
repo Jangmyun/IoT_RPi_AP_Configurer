@@ -10,10 +10,11 @@ echo "================================================"
 echo "  IoT RPi AP Configurer - 환경 세팅 시작"
 echo "================================================"
 
-# ---------- 1. dnsmasq 먼저 중지 ----------
+# ---------- 1. dnsmasq / hostapd 먼저 중지 ----------
 # (ap0 없는 상태에서 떠있으면 인터페이스 인식 못 함)
-echo "[1/5] dnsmasq 중지..."
+echo "[1/5] dnsmasq / hostapd 중지..."
 sudo systemctl stop dnsmasq
+sudo systemctl is-active --quiet hostapd && sudo systemctl stop hostapd || true
 
 # ---------- 2. 기존 ap0 정리 ----------
 echo "[2/5] 기존 ap0 인터페이스 정리..."
