@@ -323,6 +323,7 @@ EOF
 fi
 
 sudo tee -a /usr/local/bin/rpi-ap-boot.sh > /dev/null <<EOF
+rfkill unblock wifi 2>/dev/null || true
 ip link set "\$AP_IF" up 2>/dev/null || true
 ip addr flush dev "\$AP_IF" 2>/dev/null || true
 ip addr add "\${AP_IP}/24" dev "\$AP_IF" 2>/dev/null || true
@@ -390,16 +391,27 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-# --- hostapd 설정 경로 등록 ---
-sudo sed -i 's|^#\?DAEMON_CONF=.*|DAEMON_CONF=/etc/hostapd/hostapd.conf|' /etc/default/hostapd
+# --- hostapd config 경로: systemd drop-in으로 직접 지정 ---
+# /etc/default/hostapd 방식은 RPi OS 버전별로 동작이 달라 drop-in을 사용
+sudo mkdir -p /etc/systemd/system/hostapd.service.d
+sudo tee /etc/systemd/system/hostapd.service.d/rpi-ap.conf > /dev/null <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/sbin/hostapd /etc/hostapd/hostapd.conf
+EOF
 
 # --- 서비스 활성화 및 즉시 시작 ---
 sudo systemctl daemon-reload
 sudo systemctl unmask hostapd 2>/dev/null || true
 sudo systemctl enable hostapd dnsmasq rpi-ap-setup rpi-ap-server
 echo "    서비스 활성화: hostapd, dnsmasq, rpi-ap-setup, rpi-ap-server"
+sudo rfkill unblock wifi 2>/dev/null || true
 sudo systemctl start hostapd
-echo "    hostapd 시작 완료"
+if sudo systemctl is-active --quiet hostapd; then
+    echo "    hostapd 시작 완료"
+else
+    echo "    [경고] hostapd 시작 실패 — 로그 확인: sudo journalctl -u hostapd --no-pager | tail -20"
+fi
 sudo systemctl start rpi-ap-server
 echo "    rpi-ap-server 시작 완료"
 
