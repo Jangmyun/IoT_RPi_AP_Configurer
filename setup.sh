@@ -226,6 +226,10 @@ if [[ "$HOP" -gt 1 ]]; then
 fi
 
 if [[ "$HOP" -lt 3 ]]; then
+    if [[ -z "$NEXT_HOP_IP" ]]; then
+        echo "    [오류] NEXT_HOP_IP가 비어 있습니다 (HOP=${HOP}, SUBNET=${SUBNET})"
+        exit 1
+    fi
     for i in $(seq $((HOP+1)) 3); do
         SUBNET_ROUTE="192.168.$((100+i)).0/24"
         sudo ip route replace "$SUBNET_ROUTE" via "$NEXT_HOP_IP"
@@ -317,6 +321,10 @@ sysctl -w net.ipv4.ip_forward=1 > /dev/null
 EOF
 
 if [[ "$HOP" -lt 3 ]]; then
+    if [[ -z "$NEXT_HOP_IP" ]]; then
+        echo "    [오류] NEXT_HOP_IP가 비어 있습니다 — boot.sh 라우트 생성 불가"
+        exit 1
+    fi
     for i in $(seq $((HOP+1)) 3); do
         SUBNET_ROUTE="192.168.$((100+i)).0/24"
         echo "ip route replace ${SUBNET_ROUTE} via ${NEXT_HOP_IP}" | sudo tee -a /usr/local/bin/rpi-ap-boot.sh > /dev/null
@@ -340,9 +348,8 @@ sudo chmod +x /usr/local/bin/rpi-ap-boot.sh
 sudo tee /etc/systemd/system/rpi-ap-setup.service > /dev/null <<EOF
 [Unit]
 Description=RPi AP interface and routing setup
-DefaultDependencies=no
-After=network.target
-Before=hostapd.service rpi-ap-server.service
+After=sys-subsystem-net-devices-${AP_IF}.device network.target
+Before=hostapd.service dnsmasq.service rpi-ap-server.service
 
 [Service]
 Type=oneshot
@@ -357,8 +364,7 @@ EOF
 sudo tee /etc/systemd/system/rpi-ap-server.service > /dev/null <<EOF
 [Unit]
 Description=RPi AP Configurer FastAPI server
-After=rpi-ap-setup.service hostapd.service network-online.target
-Wants=network-online.target
+After=rpi-ap-setup.service hostapd.service dnsmasq.service
 
 [Service]
 Type=simple
@@ -378,8 +384,8 @@ sudo sed -i 's|^#\?DAEMON_CONF=.*|DAEMON_CONF=/etc/hostapd/hostapd.conf|' /etc/d
 # --- 서비스 활성화 ---
 sudo systemctl daemon-reload
 sudo systemctl unmask hostapd 2>/dev/null || true
-sudo systemctl enable hostapd rpi-ap-setup rpi-ap-server
-echo "    서비스 활성화: hostapd, rpi-ap-setup, rpi-ap-server"
+sudo systemctl enable hostapd dnsmasq rpi-ap-setup rpi-ap-server
+echo "    서비스 활성화: hostapd, dnsmasq, rpi-ap-setup, rpi-ap-server"
 
 # ============================================================
 # 상태 확인
