@@ -188,6 +188,23 @@ echo "    완료: AP IP=${AP_IP}, DHCP=${DHCP_START}~${DHCP_END}"
 # [4/8] AP 인터페이스 설정
 # ============================================================
 echo "[4/8] AP 인터페이스 설정 (${AP_IF})..."
+
+# NetworkManager/wpa_supplicant가 인터페이스를 nl80211 소켓으로 점유하면
+# hostapd가 AP 모드 전환 불가 → 영구 unmanaged 등록 후 down/up 사이클로 강제 해제
+if command -v nmcli &>/dev/null; then
+    sudo mkdir -p /etc/NetworkManager/conf.d
+    sudo tee /etc/NetworkManager/conf.d/rpi-ap-unmanaged.conf > /dev/null <<EOF
+[keyfile]
+unmanaged-devices=interface-name:${AP_IF}
+EOF
+    sudo nmcli device set "$AP_IF" managed no 2>/dev/null || true
+    sudo systemctl reload NetworkManager 2>/dev/null || true
+    echo "    NetworkManager: ${AP_IF} unmanaged 설정"
+fi
+# 인터페이스 down → wpa_supplicant/NM 소켓 강제 해제 → up
+sudo ip link set "$AP_IF" down 2>/dev/null || true
+sleep 1
+
 if [[ "$AP_IF" == "ap0" ]]; then
     # 가상 인터페이스: wlan0 위에 생성 (fallback)
     sudo iw dev ap0 del 2>/dev/null || true
@@ -312,6 +329,12 @@ for _i in \$(seq 1 20); do
     ip link show "\$AP_IF" >/dev/null 2>&1 && break
     sleep 1
 done
+
+# NM/wpa_supplicant가 인터페이스를 점유하면 hostapd AP 모드 전환 불가
+# → unmanaged 설정 + down/up 사이클로 nl80211 소켓 강제 해제
+nmcli device set "\$AP_IF" managed no 2>/dev/null || true
+ip link set "\$AP_IF" down 2>/dev/null || true
+sleep 1
 
 EOF
 
