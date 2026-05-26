@@ -52,6 +52,27 @@ if [[ -z "$AP_IF" ]]; then
     fi
 fi
 
+# ---------- AP 모드 지원 여부 사전 검사 ----------
+if [[ "$AP_IF" != "ap0" ]]; then
+    _PHY=$(iw dev "$AP_IF" info 2>/dev/null | awk '/wiphy/{print "phy"$NF}')
+    if [[ -n "$_PHY" ]] && ! iw phy "$_PHY" info 2>/dev/null | grep -qE '^\s+\* AP$'; then
+        echo ""
+        echo "  [오류] ${AP_IF} 드라이버(${_PHY})가 AP 모드를 지원하지 않습니다."
+        echo ""
+        iw phy "$_PHY" info 2>/dev/null | grep -A 6 "Supported interface modes" || true
+        echo ""
+        echo "  AP 모드를 지원하는 동글로 교체하거나 (Ralink RT5370, Atheros AR9271 등)"
+        echo "  ap0 가상 인터페이스(RPi 온보드 wlan0 사용)를 선택하세요."
+        read -rp "  ap0로 대신 진행하시겠습니까? (y/N): " FALLBACK2
+        if [[ "$FALLBACK2" =~ ^[yY]$ ]]; then
+            AP_IF="ap0"
+        else
+            echo "종료합니다."
+            exit 1
+        fi
+    fi
+fi
+
 # ---------- SSID / 비밀번호 ----------
 SSID="iot2-${HOP}"
 WPA_PASS="00000000"
@@ -216,12 +237,12 @@ if [[ "$AP_IF" == "ap0" ]]; then
     sudo ip link set ap0 up
     sudo ip addr add "${AP_IP}/24" dev ap0
 else
-    # USB 동글 물리 인터페이스: IP만 할당 (hostapd가 AP 모드 전환)
-    sudo ip link set "$AP_IF" up
+    # USB 동글: IP 할당만, 인터페이스는 DOWN 유지
+    # hostapd가 내부적으로 DOWN→AP모드전환→UP을 처리하므로 미리 UP하면 충돌
     sudo ip addr flush dev "$AP_IF" 2>/dev/null || true
     sudo ip addr add "${AP_IP}/24" dev "$AP_IF"
 fi
-echo "    완료: ${AP_IF} = ${AP_IP}/24"
+echo "    완료: ${AP_IF} = ${AP_IP}/24 (DOWN 유지, hostapd가 UP)"
 
 # ============================================================
 # [5/8] IP 포워딩 활성화
