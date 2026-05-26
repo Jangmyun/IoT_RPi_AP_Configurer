@@ -392,10 +392,11 @@ WantedBy=multi-user.target
 EOF
 
 # --- hostapd config 경로: systemd drop-in으로 직접 지정 ---
-# /etc/default/hostapd 방식은 RPi OS 버전별로 동작이 달라 drop-in을 사용
+# Type=simple: ExecStart만 교체 시 기존 Type=forking이 상속돼 PID 파일 대기 타임아웃 발생
 sudo mkdir -p /etc/systemd/system/hostapd.service.d
 sudo tee /etc/systemd/system/hostapd.service.d/rpi-ap.conf > /dev/null <<'EOF'
 [Service]
+Type=simple
 ExecStart=
 ExecStart=/usr/sbin/hostapd /etc/hostapd/hostapd.conf
 EOF
@@ -410,7 +411,10 @@ sudo systemctl start hostapd
 if sudo systemctl is-active --quiet hostapd; then
     echo "    hostapd 시작 완료"
 else
-    echo "    [경고] hostapd 시작 실패 — 로그 확인: sudo journalctl -u hostapd --no-pager | tail -20"
+    echo "    [오류] hostapd 시작 실패 — 원인:"
+    sudo journalctl -u hostapd --no-pager -n 20 2>/dev/null || true
+    echo ""
+    echo "    위 로그를 공유해주세요."
 fi
 sudo systemctl start rpi-ap-server
 echo "    rpi-ap-server 시작 완료"
