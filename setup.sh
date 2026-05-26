@@ -53,18 +53,8 @@ if [[ -z "$AP_IF" ]]; then
 fi
 
 # ---------- SSID / 비밀번호 ----------
-read -rp "AP SSID: " SSID
-if [[ -z "$SSID" ]]; then
-    echo "SSID는 필수 입력입니다."
-    exit 1
-fi
-
-read -rsp "WPA 비밀번호 (8자 이상): " WPA_PASS
-echo ""
-if [[ ${#WPA_PASS} -lt 8 ]]; then
-    echo "비밀번호는 8자 이상이어야 합니다."
-    exit 1
-fi
+SSID="iot2-${HOP}"
+WPA_PASS="00000000"
 
 # ---------- WAN 인터페이스 (HOP=1 전용) ----------
 WAN_IF=""
@@ -285,6 +275,21 @@ static domain_name_servers=8.8.8.8
 # END rpi-ap-wlan0
 EOF
     echo "    wlan0 정적 IP: ${WLAN0_STATIC_IP}/24 (GW: ${WLAN0_GW})"
+
+    # wpa_supplicant: 업스트림 AP에 자동 연결 (고정 SSID/비밀번호)
+    UPSTREAM_SSID="iot2-$((HOP - 1))"
+    UPSTREAM_PSK=$(wpa_passphrase "$UPSTREAM_SSID" "00000000" | grep -E '^\s+psk=' | tr -d '\t ')
+    sudo tee /etc/wpa_supplicant/wpa_supplicant.conf > /dev/null <<EOF
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=KR
+
+network={
+    ssid="${UPSTREAM_SSID}"
+    ${UPSTREAM_PSK}
+}
+EOF
+    echo "    wpa_supplicant: ${UPSTREAM_SSID} 자동 연결 설정 완료"
 fi
 
 # --- 부팅 스크립트 생성 ---
