@@ -307,20 +307,26 @@ sudo tee /usr/local/bin/rpi-ap-boot.sh > /dev/null <<EOF
 AP_IF="${AP_IF}"
 AP_IP="${AP_IP}"
 
+# 인터페이스가 나타날 때까지 최대 20초 대기 (USB 동글 초기화 시간)
+for _i in \$(seq 1 20); do
+    ip link show "\$AP_IF" >/dev/null 2>&1 && break
+    sleep 1
+done
+
 EOF
 
 if [[ "$AP_IF" == "ap0" ]]; then
     sudo tee -a /usr/local/bin/rpi-ap-boot.sh > /dev/null <<'EOF'
 iw dev ap0 del 2>/dev/null || true
-iw dev wlan0 interface add ap0 type __ap
+iw dev wlan0 interface add ap0 type __ap 2>/dev/null || true
 EOF
 fi
 
 sudo tee -a /usr/local/bin/rpi-ap-boot.sh > /dev/null <<EOF
-ip link set "\$AP_IF" up
+ip link set "\$AP_IF" up 2>/dev/null || true
 ip addr flush dev "\$AP_IF" 2>/dev/null || true
-ip addr add "\${AP_IP}/24" dev "\$AP_IF"
-sysctl -w net.ipv4.ip_forward=1 > /dev/null
+ip addr add "\${AP_IP}/24" dev "\$AP_IF" 2>/dev/null || true
+sysctl -w net.ipv4.ip_forward=1 > /dev/null || true
 EOF
 
 if [[ "$HOP" -lt 3 ]]; then
@@ -330,7 +336,7 @@ if [[ "$HOP" -lt 3 ]]; then
     fi
     for i in $(seq $((HOP+1)) 3); do
         SUBNET_ROUTE="192.168.$((100+i)).0/24"
-        echo "ip route replace ${SUBNET_ROUTE} via ${NEXT_HOP_IP}" | sudo tee -a /usr/local/bin/rpi-ap-boot.sh > /dev/null
+        echo "ip route replace ${SUBNET_ROUTE} via ${NEXT_HOP_IP} 2>/dev/null || true" | sudo tee -a /usr/local/bin/rpi-ap-boot.sh > /dev/null
     done
 fi
 
@@ -339,11 +345,14 @@ if [[ "$HOP" -eq 1 ]]; then
 iptables -t nat -D POSTROUTING -o ${WAN_IF} -j MASQUERADE 2>/dev/null || true
 iptables -D FORWARD -i ${AP_IF} -o ${WAN_IF} -j ACCEPT 2>/dev/null || true
 iptables -D FORWARD -i ${WAN_IF} -o ${AP_IF} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
-iptables -t nat -A POSTROUTING -o ${WAN_IF} -j MASQUERADE
-iptables -A FORWARD -i ${AP_IF} -o ${WAN_IF} -j ACCEPT
-iptables -A FORWARD -i ${WAN_IF} -o ${AP_IF} -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -t nat -A POSTROUTING -o ${WAN_IF} -j MASQUERADE 2>/dev/null || true
+iptables -A FORWARD -i ${AP_IF} -o ${WAN_IF} -j ACCEPT 2>/dev/null || true
+iptables -A FORWARD -i ${WAN_IF} -o ${AP_IF} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
 EOF
 fi
+
+# 스크립트는 항상 0으로 종료 (개별 명령 실패가 서비스 전체를 막지 않도록)
+echo "exit 0" | sudo tee -a /usr/local/bin/rpi-ap-boot.sh > /dev/null
 
 sudo chmod +x /usr/local/bin/rpi-ap-boot.sh
 
@@ -384,11 +393,15 @@ EOF
 # --- hostapd 설정 경로 등록 ---
 sudo sed -i 's|^#\?DAEMON_CONF=.*|DAEMON_CONF=/etc/hostapd/hostapd.conf|' /etc/default/hostapd
 
-# --- 서비스 활성화 ---
+# --- 서비스 활성화 및 즉시 시작 ---
 sudo systemctl daemon-reload
 sudo systemctl unmask hostapd 2>/dev/null || true
 sudo systemctl enable hostapd dnsmasq rpi-ap-setup rpi-ap-server
 echo "    서비스 활성화: hostapd, dnsmasq, rpi-ap-setup, rpi-ap-server"
+sudo systemctl start hostapd
+echo "    hostapd 시작 완료"
+sudo systemctl start rpi-ap-server
+echo "    rpi-ap-server 시작 완료"
 
 # ============================================================
 # 상태 확인
@@ -408,14 +421,8 @@ echo "================================================"
 echo "  셋업 완료! (RPi #${HOP}, AP: ${AP_IF})"
 echo "================================================"
 echo ""
-echo "hostapd 시작:"
-echo "  sudo systemctl start hostapd"
-echo ""
-echo "FastAPI 서버 시작:"
-echo "  sudo systemctl start rpi-ap-server"
-echo ""
 echo "서비스 상태 확인:"
-echo "  sudo systemctl status hostapd rpi-ap-setup rpi-ap-server"
+echo "  sudo systemctl status hostapd dnsmasq rpi-ap-setup rpi-ap-server"
 echo ""
 if [[ "$HOP" -gt 1 ]]; then
     echo "wlan0 정적 IP (재부팅 후 적용):"
