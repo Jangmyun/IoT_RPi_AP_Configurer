@@ -221,8 +221,11 @@ echo "[6/8] 정적 라우팅 설정..."
 
 if [[ "$HOP" -gt 1 ]]; then
     sudo ip route del default 2>/dev/null || true
-    sudo ip route add default via "$UPSTREAM_GW"
-    echo "    default via ${UPSTREAM_GW}"
+    if sudo ip route add default via "$UPSTREAM_GW" 2>/dev/null; then
+        echo "    default via ${UPSTREAM_GW}"
+    else
+        echo "    default via ${UPSTREAM_GW} (wlan0 미연결 — 재부팅 후 dhcpcd 자동 설정)"
+    fi
 fi
 
 if [[ "$HOP" -lt 3 ]]; then
