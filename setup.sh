@@ -201,7 +201,11 @@ EOF
     sudo systemctl reload NetworkManager 2>/dev/null || true
     echo "    NetworkManager: ${AP_IF} unmanaged 설정"
 fi
-# 인터페이스 down → wpa_supplicant/NM 소켓 강제 해제 → up
+# wpa_supplicant가 nl80211 소켓을 점유하면 hostapd AP 모드 전환 불가 → 강제 종료
+sudo wpa_cli -i "$AP_IF" terminate 2>/dev/null || true
+sudo pkill -f "wpa_supplicant.*${AP_IF}" 2>/dev/null || true
+sleep 1
+# 인터페이스 down → up 사이클로 잔여 소켓 정리
 sudo ip link set "$AP_IF" down 2>/dev/null || true
 sleep 1
 
@@ -331,8 +335,11 @@ for _i in \$(seq 1 20); do
 done
 
 # NM/wpa_supplicant가 인터페이스를 점유하면 hostapd AP 모드 전환 불가
-# → unmanaged 설정 + down/up 사이클로 nl80211 소켓 강제 해제
+# → unmanaged 설정 후 wpa_supplicant 강제 종료 + down/up 사이클
 nmcli device set "\$AP_IF" managed no 2>/dev/null || true
+wpa_cli -i "\$AP_IF" terminate 2>/dev/null || true
+pkill -f "wpa_supplicant.*\$AP_IF" 2>/dev/null || true
+sleep 1
 ip link set "\$AP_IF" down 2>/dev/null || true
 sleep 1
 
