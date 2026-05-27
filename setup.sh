@@ -289,17 +289,8 @@ if [[ "$HOP" -gt 1 ]]; then
     fi
 fi
 
-if [[ "$HOP" -lt 3 ]]; then
-    if [[ -z "$NEXT_HOP_IP" ]]; then
-        echo "    [오류] NEXT_HOP_IP가 비어 있습니다 (HOP=${HOP}, SUBNET=${SUBNET})"
-        exit 1
-    fi
-    for i in $(seq $((HOP+1)) 3); do
-        SUBNET_ROUTE="192.168.$((100+i)).0/24"
-        sudo ip route replace "$SUBNET_ROUTE" via "$NEXT_HOP_IP"
-        echo "    ${SUBNET_ROUTE} via ${NEXT_HOP_IP}"
-    done
-fi
+# 다운스트림 라우트는 AP 인터페이스가 UP 된 후(hostapd 기동 후)에야
+# 같은 서브넷의 게이트웨이(.2)가 reachable해지므로 [8/8] 뒤로 미룬다.
 
 # ============================================================
 # [7/8] dnsmasq 시작 + NAT (HOP=1)
@@ -497,6 +488,23 @@ else
 fi
 sudo systemctl start rpi-ap-server
 echo "    rpi-ap-server 시작 완료"
+
+# ---- 다운스트림 라우트: hostapd로 AP_IF가 UP 된 후에야 게이트웨이(.2)가 reachable ----
+if [[ "$HOP" -lt 3 ]]; then
+    # hostapd가 AP 모드 전환 + UP 완료할 시간 확보
+    for _i in $(seq 1 10); do
+        ip link show "$AP_IF" 2>/dev/null | grep -q 'state UP' && break
+        sleep 1
+    done
+    for i in $(seq $((HOP+1)) 3); do
+        SUBNET_ROUTE="192.168.$((100+i)).0/24"
+        if sudo ip route replace "$SUBNET_ROUTE" via "$NEXT_HOP_IP" 2>/dev/null; then
+            echo "    route: ${SUBNET_ROUTE} via ${NEXT_HOP_IP}"
+        else
+            echo "    route: ${SUBNET_ROUTE} via ${NEXT_HOP_IP} (지금은 실패 — 재부팅 후 boot.sh가 재시도)"
+        fi
+    done
+fi
 
 # ============================================================
 # 상태 확인
