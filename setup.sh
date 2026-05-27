@@ -35,41 +35,50 @@ AP_IP="192.168.${SUBNET}.1"
 DHCP_START="192.168.${SUBNET}.10"
 DHCP_END="192.168.${SUBNET}.100"
 
-# ---------- AP 인터페이스 자동 감지 ----------
-# USB 동글: iw dev 에서 wlx* 패턴으로 감지 (MAC 기반 이름)
-AP_IF=$(iw dev 2>/dev/null | grep -oP 'Interface \Kwlx\S+' | head -1)
+# ---------- AP / STA 인터페이스 자동 감지 ----------
+# 기본 가정: AP=USB 동글, STA=wlan0(내장)
+# 동글이 AP 모드 미지원 시 자동 스왑: AP=wlan0, STA=동글
+DONGLE_IF=$(iw dev 2>/dev/null | grep -oP 'Interface \Kwlx\S+' | head -1)
+AP_IF=""
+STA_IF="wlan0"
 
-if [[ -z "$AP_IF" ]]; then
+_phy_supports_ap() {
+    local _phy
+    _phy=$(iw dev "$1" info 2>/dev/null | awk '/wiphy/{print "phy"$NF}')
+    [[ -z "$_phy" ]] && return 1
+    iw phy "$_phy" info 2>/dev/null | grep -qE '^\s+\* AP$'
+}
+
+if [[ -n "$DONGLE_IF" ]]; then
+    if _phy_supports_ap "$DONGLE_IF"; then
+        AP_IF="$DONGLE_IF"
+        STA_IF="wlan0"
+        echo ""
+        echo "  USB 동글(${DONGLE_IF}) AP 모드 지원 → AP=${AP_IF}, STA=${STA_IF}"
+    else
+        echo ""
+        echo "  USB 동글(${DONGLE_IF})이 AP 모드를 지원하지 않습니다."
+        if _phy_supports_ap "wlan0"; then
+            AP_IF="wlan0"
+            STA_IF="$DONGLE_IF"
+            echo "  → 자동 스왑: AP=wlan0 (내장), STA=${DONGLE_IF}"
+        else
+            echo "  [오류] 내장 wlan0도 AP 모드 미지원."
+            iw dev "$DONGLE_IF" info 2>/dev/null | awk '/wiphy/{print "phy"$NF}' \
+                | xargs -I{} iw phy {} info 2>/dev/null | grep -A 6 "Supported interface modes" || true
+            exit 1
+        fi
+    fi
+else
     echo ""
     echo "  경고: USB WiFi 동글(wlx*)을 감지하지 못했습니다."
-    echo "  동글이 꽂혀 있는지 확인하세요."
     read -rp "  ap0 가상 인터페이스(wlan0 공유)로 대신 진행하시겠습니까? (y/N): " FALLBACK
     if [[ "$FALLBACK" =~ ^[yY]$ ]]; then
         AP_IF="ap0"
+        STA_IF="wlan0"  # ap0은 wlan0 위에 가상 생성 — STA 역할도 wlan0이 겸함 (채널 일치 필요)
     else
         echo "종료합니다."
         exit 1
-    fi
-fi
-
-# ---------- AP 모드 지원 여부 사전 검사 ----------
-if [[ "$AP_IF" != "ap0" ]]; then
-    _PHY=$(iw dev "$AP_IF" info 2>/dev/null | awk '/wiphy/{print "phy"$NF}')
-    if [[ -n "$_PHY" ]] && ! iw phy "$_PHY" info 2>/dev/null | grep -qE '^\s+\* AP$'; then
-        echo ""
-        echo "  [오류] ${AP_IF} 드라이버(${_PHY})가 AP 모드를 지원하지 않습니다."
-        echo ""
-        iw phy "$_PHY" info 2>/dev/null | grep -A 6 "Supported interface modes" || true
-        echo ""
-        echo "  AP 모드를 지원하는 동글로 교체하거나 (Ralink RT5370, Atheros AR9271 등)"
-        echo "  ap0 가상 인터페이스(RPi 온보드 wlan0 사용)를 선택하세요."
-        read -rp "  ap0로 대신 진행하시겠습니까? (y/N): " FALLBACK2
-        if [[ "$FALLBACK2" =~ ^[yY]$ ]]; then
-            AP_IF="ap0"
-        else
-            echo "종료합니다."
-            exit 1
-        fi
     fi
 fi
 
@@ -82,12 +91,12 @@ WAN_IF=""
 if [[ "$HOP" -eq 1 ]]; then
     echo ""
     echo "인터넷 연결 방식을 선택하세요:"
-    echo "  1) eth0  (LAN 케이블)"
-    echo "  2) wlan0 (WiFi)"
+    echo "  1) eth0    (LAN 케이블)"
+    echo "  2) ${STA_IF}  (WiFi)"
     read -rp "선택 (1/2): " WAN_CHOICE
     case "$WAN_CHOICE" in
         1) WAN_IF="eth0" ;;
-        2) WAN_IF="wlan0" ;;
+        2) WAN_IF="$STA_IF" ;;
         *) echo "1 또는 2를 입력하세요."; exit 1 ;;
     esac
 fi
@@ -103,13 +112,13 @@ fi
 declare -A DEFAULT_CHANNEL=([1]=1 [2]=6 [3]=11)
 
 if [[ "$AP_IF" == "ap0" ]]; then
-    # ap0 fallback: wlan0과 같은 칩 → 채널 반드시 일치
-    CHANNEL=$(iw dev wlan0 info 2>/dev/null | grep -oP 'channel \K[0-9]+' || true)
+    # ap0 fallback: ${STA_IF}와 같은 칩 → 채널 반드시 일치
+    CHANNEL=$(iw dev "$STA_IF" info 2>/dev/null | grep -oP 'channel \K[0-9]+' || true)
     if [[ -z "$CHANNEL" ]]; then
         echo ""
-        echo "  wlan0 채널을 감지하지 못했습니다 (ap0은 wlan0 채널과 일치해야 함)."
+        echo "  ${STA_IF} 채널을 감지하지 못했습니다 (ap0은 ${STA_IF} 채널과 일치해야 함)."
         if [[ "$HOP" -gt 1 ]]; then
-            echo "  업스트림 AP에 wlan0이 먼저 연결되어야 합니다."
+            echo "  업스트림 AP에 ${STA_IF}이 먼저 연결되어야 합니다."
         fi
         read -rp "  채널 번호를 입력하세요 (예: 1, 6, 11): " CHANNEL
     fi
@@ -132,9 +141,13 @@ echo ""
 echo "─── 설정 확인 ───"
 echo "  홉 번호    : RPi #${HOP}"
 if [[ "$AP_IF" == "ap0" ]]; then
-    echo "  AP 인터페이스: ap0 (wlan0 가상, 채널 공유)"
+    echo "  AP 인터페이스: ap0 (${STA_IF} 가상, 채널 공유)"
+elif [[ "$AP_IF" == "wlan0" ]]; then
+    echo "  AP 인터페이스: wlan0 (내장, 동글 AP 미지원으로 스왑)"
+    echo "  STA 인터페이스: ${STA_IF} (USB 동글)"
 else
     echo "  AP 인터페이스: ${AP_IF} (USB 동글, 독립 라디오)"
+    echo "  STA 인터페이스: ${STA_IF} (내장)"
 fi
 echo "  AP IP      : ${AP_IP}"
 echo "  SSID       : ${SSID}"
@@ -214,13 +227,19 @@ echo "[4/8] AP 인터페이스 설정 (${AP_IF})..."
 # hostapd가 AP 모드 전환 불가 → 영구 unmanaged 등록 후 down/up 사이클로 강제 해제
 if command -v nmcli &>/dev/null; then
     sudo mkdir -p /etc/NetworkManager/conf.d
+    # AP_IF는 항상 unmanaged. STA_IF도 wpa_supplicant@STA_IF와 충돌 방지 위해 unmanaged (HOP>1)
+    _NM_UNMANAGED="interface-name:${AP_IF}"
+    if [[ "$HOP" -gt 1 && -n "$STA_IF" && "$STA_IF" != "$AP_IF" ]]; then
+        _NM_UNMANAGED="${_NM_UNMANAGED};interface-name:${STA_IF}"
+    fi
     sudo tee /etc/NetworkManager/conf.d/rpi-ap-unmanaged.conf > /dev/null <<EOF
 [keyfile]
-unmanaged-devices=interface-name:${AP_IF}
+unmanaged-devices=${_NM_UNMANAGED}
 EOF
     sudo nmcli device set "$AP_IF" managed no 2>/dev/null || true
+    [[ "$HOP" -gt 1 && "$STA_IF" != "$AP_IF" ]] && sudo nmcli device set "$STA_IF" managed no 2>/dev/null || true
     sudo systemctl reload NetworkManager 2>/dev/null || true
-    echo "    NetworkManager: ${AP_IF} unmanaged 설정"
+    echo "    NetworkManager: ${_NM_UNMANAGED} unmanaged 설정"
 fi
 # wpa_supplicant가 nl80211 소켓을 점유하면 hostapd AP 모드 전환 불가 → 강제 종료
 sudo wpa_cli -i "$AP_IF" terminate 2>/dev/null || true
@@ -305,30 +324,33 @@ fi
 # ============================================================
 echo "[8/8] 부팅 자동 시작 설정..."
 
-# --- wlan0 정적 IP (HOP > 1) ---
-# 이 RPi의 wlan0은 업스트림 AP에서 항상 .2 주소를 사용한다.
+# --- STA 인터페이스 정적 IP (HOP > 1) ---
+# 이 RPi의 STA(${STA_IF})는 업스트림 AP에서 항상 .2 주소를 사용한다.
 # 업스트림 RPi는 이 IP를 NEXT_HOP으로 사전에 알고 있어 별도 협상이 불필요.
 if [[ "$HOP" -gt 1 ]]; then
     PREV_SUBNET=$((SUBNET - 1))
-    WLAN0_STATIC_IP="192.168.${PREV_SUBNET}.2"
-    WLAN0_GW="192.168.${PREV_SUBNET}.1"
+    STA_STATIC_IP="192.168.${PREV_SUBNET}.2"
+    STA_GW="192.168.${PREV_SUBNET}.1"
 
+    sudo sed -i '/# BEGIN rpi-ap-sta/,/# END rpi-ap-sta/d' /etc/dhcpcd.conf
+    # 과거 버전이 남긴 wlan0 전용 블록도 정리
     sudo sed -i '/# BEGIN rpi-ap-wlan0/,/# END rpi-ap-wlan0/d' /etc/dhcpcd.conf
     sudo tee -a /etc/dhcpcd.conf > /dev/null <<EOF
 
-# BEGIN rpi-ap-wlan0
-interface wlan0
-static ip_address=${WLAN0_STATIC_IP}/24
-static routers=${WLAN0_GW}
+# BEGIN rpi-ap-sta
+interface ${STA_IF}
+static ip_address=${STA_STATIC_IP}/24
+static routers=${STA_GW}
 static domain_name_servers=8.8.8.8
-# END rpi-ap-wlan0
+# END rpi-ap-sta
 EOF
-    echo "    wlan0 정적 IP: ${WLAN0_STATIC_IP}/24 (GW: ${WLAN0_GW})"
+    echo "    ${STA_IF} 정적 IP: ${STA_STATIC_IP}/24 (GW: ${STA_GW})"
 
     # wpa_supplicant: 업스트림 AP에 자동 연결 (고정 SSID/비밀번호)
+    # 인터페이스별 설정 파일 + wpa_supplicant@${STA_IF}.service 로 STA_IF에만 적용
     UPSTREAM_SSID="iot2-$((HOP - 1))"
     UPSTREAM_PSK=$(wpa_passphrase "$UPSTREAM_SSID" "00000000" | grep -E '^\s+psk=' | tr -d '\t ')
-    sudo tee /etc/wpa_supplicant/wpa_supplicant.conf > /dev/null <<EOF
+    sudo tee "/etc/wpa_supplicant/wpa_supplicant-${STA_IF}.conf" > /dev/null <<EOF
 ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
 update_config=1
 country=KR
@@ -338,7 +360,13 @@ network={
     ${UPSTREAM_PSK}
 }
 EOF
-    echo "    wpa_supplicant: ${UPSTREAM_SSID} 자동 연결 설정 완료"
+    # AP_IF=wlan0(스왑)일 때 wlan0용 wpa_supplicant가 hostapd와 충돌하지 않도록 비활성화
+    if [[ "$AP_IF" == "wlan0" ]]; then
+        sudo systemctl disable --now wpa_supplicant@wlan0 2>/dev/null || true
+        sudo systemctl disable --now wpa_supplicant 2>/dev/null || true
+    fi
+    sudo systemctl enable "wpa_supplicant@${STA_IF}" 2>/dev/null || true
+    echo "    wpa_supplicant@${STA_IF}: ${UPSTREAM_SSID} 자동 연결 설정 완료"
 fi
 
 # --- 부팅 스크립트 생성 ---
