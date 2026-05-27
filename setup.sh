@@ -338,26 +338,52 @@ EOF
     echo "    ${STA_IF} 정적 IP: ${STA_STATIC_IP}/24 (GW: ${STA_GW})"
 
     # wpa_supplicant: 업스트림 AP에 자동 연결 (고정 SSID/비밀번호)
-    # 인터페이스별 설정 파일 + wpa_supplicant@${STA_IF}.service 로 STA_IF에만 적용
+    # update_config=0  → 런타임 변경/저장 금지 (다른 SSID 학습 방지)
+    # priority=10      → 다른 네트워크가 끼어들어도 이 SSID 우선
+    # scan_ssid=1      → hidden/약신호 SSID도 능동 스캔
     UPSTREAM_SSID="iot2-$((HOP - 1))"
     UPSTREAM_PSK=$(wpa_passphrase "$UPSTREAM_SSID" "00000000" | grep -E '^\s+psk=' | tr -d '\t ')
-    sudo tee "/etc/wpa_supplicant/wpa_supplicant-${STA_IF}.conf" > /dev/null <<EOF
+    _WPA_CONF_BODY=$(cat <<EOF
 ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
+update_config=0
 country=KR
+ap_scan=1
 
 network={
     ssid="${UPSTREAM_SSID}"
+    scan_ssid=1
+    priority=10
     ${UPSTREAM_PSK}
 }
 EOF
-    # AP_IF=wlan0(스왑)일 때 wlan0용 wpa_supplicant가 hostapd와 충돌하지 않도록 비활성화
+)
+    # 인터페이스별 파일과 글로벌 파일 둘 다 우리 SSID만 남도록 덮어쓴다.
+    # (dhcpcd 훅 / 다른 서비스가 글로벌 파일을 쓰는 경우에도 이전 네트워크 복원 방지)
+    echo "$_WPA_CONF_BODY" | sudo tee "/etc/wpa_supplicant/wpa_supplicant-${STA_IF}.conf" > /dev/null
+    echo "$_WPA_CONF_BODY" | sudo tee /etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
+
+    # NetworkManager에 저장된 기존 Wi-Fi 프로필 제거 (재부팅 시 자동 연결되는 옛 SSID 차단)
+    if command -v nmcli &>/dev/null; then
+        # 모든 wifi 타입 connection을 삭제 — 이 RPi는 STA_IF로만 업스트림에 붙으면 됨
+        nmcli -t -f UUID,TYPE connection show 2>/dev/null \
+            | awk -F: '$2=="802-11-wireless"{print $1}' \
+            | xargs -r -n1 sudo nmcli connection delete 2>/dev/null || true
+        echo "    NetworkManager 저장 Wi-Fi 프로필 삭제 완료"
+    fi
+
+    # 충돌 가능 서비스 정리
+    # - 글로벌 wpa_supplicant.service: 인터페이스 미지정 → 중복 인스턴스 위험
+    # - wpa_supplicant@wlan0: AP_IF=wlan0 스왑 시 hostapd와 충돌
+    sudo systemctl disable --now wpa_supplicant 2>/dev/null || true
     if [[ "$AP_IF" == "wlan0" ]]; then
         sudo systemctl disable --now wpa_supplicant@wlan0 2>/dev/null || true
-        sudo systemctl disable --now wpa_supplicant 2>/dev/null || true
     fi
+    # STA_IF용 기존 wpa_supplicant 강제 정리 후 새 설정으로 재시작
+    sudo pkill -f "wpa_supplicant.*${STA_IF}" 2>/dev/null || true
+    sleep 1
     sudo systemctl enable "wpa_supplicant@${STA_IF}" 2>/dev/null || true
-    echo "    wpa_supplicant@${STA_IF}: ${UPSTREAM_SSID} 자동 연결 설정 완료"
+    sudo systemctl restart "wpa_supplicant@${STA_IF}" 2>/dev/null || true
+    echo "    wpa_supplicant@${STA_IF}: ${UPSTREAM_SSID} 전용 설정으로 재시작"
 fi
 
 # --- 부팅 스크립트 생성 ---
@@ -367,6 +393,8 @@ sudo tee /usr/local/bin/rpi-ap-boot.sh > /dev/null <<EOF
 
 AP_IF="${AP_IF}"
 AP_IP="${AP_IP}"
+STA_IF="${STA_IF}"
+HOP="${HOP}"
 
 # 인터페이스가 나타날 때까지 최대 20초 대기 (USB 동글 초기화 시간)
 for _i in \$(seq 1 20); do
@@ -382,6 +410,15 @@ pkill -f "wpa_supplicant.*\$AP_IF" 2>/dev/null || true
 sleep 1
 ip link set "\$AP_IF" down 2>/dev/null || true
 sleep 1
+
+# STA_IF: 다른 SSID로 잘못 붙는 것을 막기 위해 wpa_supplicant 재시작 강제
+# (dhcpcd 훅 / 잔여 인스턴스가 글로벌 conf로 다른 네트워크에 붙는 경우 차단)
+if [[ "\$HOP" -gt 1 && -n "\$STA_IF" && "\$STA_IF" != "\$AP_IF" ]]; then
+    nmcli device set "\$STA_IF" managed no 2>/dev/null || true
+    pkill -f "wpa_supplicant.*\$STA_IF" 2>/dev/null || true
+    sleep 1
+    systemctl restart "wpa_supplicant@\$STA_IF" 2>/dev/null || true
+fi
 
 EOF
 
