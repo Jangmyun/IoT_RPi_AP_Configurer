@@ -404,6 +404,23 @@ EOF
     sudo systemctl enable "wpa_supplicant@${STA_IF}" 2>/dev/null || true
     sudo systemctl restart "wpa_supplicant@${STA_IF}" 2>/dev/null || true
     echo "    wpa_supplicant@${STA_IF}: ${UPSTREAM_SSID} 전용 설정으로 재시작"
+
+    # ---- STA_IF에 정적 IP/default route 직접 부여 ----
+    # dhcpcd가 부팅 시 STA_IF 정적 IP를 적용하지 못하는 케이스 대비
+    # (association은 되지만 IP가 없어 통신 불가 — 수동 ip addr add로 회복되는 현상)
+    sudo ip link set "$STA_IF" up 2>/dev/null || true
+    # 최대 15초 association 대기 (association 전이라도 IP 할당은 가능하지만 게이트웨이 reachability는 association 필요)
+    for _i in $(seq 1 15); do
+        iw dev "$STA_IF" link 2>/dev/null | grep -q "Connected to" && break
+        sleep 1
+    done
+    sudo ip addr flush dev "$STA_IF" 2>/dev/null || true
+    sudo ip addr add "${STA_STATIC_IP}/24" dev "$STA_IF"
+    # default route: HOP=1 방향(인터넷)으로 향하도록 갱신
+    sudo ip route del default 2>/dev/null || true
+    sudo ip route add default via "$STA_GW" dev "$STA_IF" 2>/dev/null \
+        || echo "    [경고] default via ${STA_GW} 추가 실패 (association 미완 가능성)"
+    echo "    ${STA_IF} 정적 IP 적용: ${STA_STATIC_IP}/24 via ${STA_GW}"
 fi
 
 # --- 부팅 스크립트 생성 ---
@@ -415,6 +432,8 @@ AP_IF="${AP_IF}"
 AP_IP="${AP_IP}"
 STA_IF="${STA_IF}"
 HOP="${HOP}"
+STA_STATIC_IP="$([[ "$HOP" -gt 1 ]] && echo "192.168.$((SUBNET-1)).2")"
+STA_GW="$([[ "$HOP" -gt 1 ]] && echo "192.168.$((SUBNET-1)).1")"
 
 # 인터페이스가 나타날 때까지 최대 20초 대기 (USB 동글 초기화 시간)
 for _i in \$(seq 1 20); do
@@ -437,7 +456,22 @@ if [[ "\$HOP" -gt 1 && -n "\$STA_IF" && "\$STA_IF" != "\$AP_IF" ]]; then
     nmcli device set "\$STA_IF" managed no 2>/dev/null || true
     pkill -f "wpa_supplicant.*\$STA_IF" 2>/dev/null || true
     sleep 1
+    ip link set "\$STA_IF" up 2>/dev/null || true
     systemctl restart "wpa_supplicant@\$STA_IF" 2>/dev/null || true
+
+    # association 대기 (최대 15초)
+    for _i in \$(seq 1 15); do
+        iw dev "\$STA_IF" link 2>/dev/null | grep -q "Connected to" && break
+        sleep 1
+    done
+
+    # 정적 IP 직접 부여 (dhcpcd 미적용 케이스 대비)
+    # association은 됐지만 IP 없는 상태 → 수동 할당으로 복구
+    ip addr flush dev "\$STA_IF" 2>/dev/null || true
+    ip addr add "\${STA_STATIC_IP}/24" dev "\$STA_IF" 2>/dev/null || true
+    # default route: 업스트림 GW로
+    ip route del default 2>/dev/null || true
+    ip route add default via "\$STA_GW" dev "\$STA_IF" 2>/dev/null || true
 fi
 
 EOF
