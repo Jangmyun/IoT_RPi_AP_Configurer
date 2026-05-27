@@ -173,6 +173,26 @@ if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
 fi
 echo ""
 
+# ---------- 검증용 상태 파일 ----------
+# verify.sh가 이 파일을 읽어 설정값과 실제 시스템 상태를 비교한다.
+sudo mkdir -p /etc/rpi-ap
+sudo tee /etc/rpi-ap/state.env > /dev/null <<EOF
+HOP=${HOP}
+AP_IF=${AP_IF}
+STA_IF=${STA_IF}
+AP_IP=${AP_IP}
+SSID=${SSID}
+CHANNEL=${CHANNEL}
+SUBNET=${SUBNET}
+DHCP_START=${DHCP_START}
+DHCP_END=${DHCP_END}
+WAN_IF=${WAN_IF}
+UPSTREAM_GW=${UPSTREAM_GW}
+NEXT_HOP_IP=${NEXT_HOP_IP}
+UPSTREAM_SSID=$([[ "$HOP" -gt 1 ]] && echo "iot2-$((HOP-1))" || echo "")
+STA_STATIC_IP=$([[ "$HOP" -gt 1 ]] && echo "192.168.$((SUBNET-1)).2" || echo "")
+EOF
+
 # ============================================================
 # [1/8] dnsmasq / hostapd 중지
 # ============================================================
