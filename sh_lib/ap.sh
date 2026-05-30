@@ -19,8 +19,9 @@ ieee80211d=1
 hw_mode=g
 channel=${CHANNEL}
 ieee80211n=1
-# HT20 + long GI + RX-STBC: 협대역으로 수신감도 우선 (속도 < 거리)
-ht_capab=[RX-STBC1]
+# HT20 + long GI: 협대역으로 수신감도 우선 (속도 < 거리)
+# ht_capab은 드라이버별 지원 차이 큼 — brcmfmac(Pi 내장)은 RX-STBC 미지원
+# 기본값(빈 capab) 사용해서 어떤 칩셋이든 안전하게 동작
 wmm_enabled=1
 auth_algs=1
 
