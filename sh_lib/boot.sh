@@ -16,6 +16,9 @@ HOP="${HOP}"
 STA_STATIC_IP="$([[ "$HOP" -gt 1 ]] && echo "192.168.$((SUBNET-1)).2")"
 STA_GW="$([[ "$HOP" -gt 1 ]] && echo "192.168.$((SUBNET-1)).1")"
 
+# 규정 도메인 명시 — KR 한도(20 dBm)까지 TX power 허용
+iw reg set KR 2>/dev/null || true
+
 # 인터페이스가 나타날 때까지 최대 20초 대기 (USB 동글 초기화 시간)
 for _i in \$(seq 1 20); do
     ip link show "\$AP_IF" >/dev/null 2>&1 && break
@@ -53,6 +56,9 @@ if [[ "\$HOP" -gt 1 && -n "\$STA_IF" && "\$STA_IF" != "\$AP_IF" ]]; then
     # default route: 업스트림 GW로
     ip route del default 2>/dev/null || true
     ip route add default via "\$STA_GW" dev "\$STA_IF" 2>/dev/null || true
+
+    # STA TX power 최대 (20 dBm = 2000 mBm, KR 한도)
+    iw dev "\$STA_IF" set txpower fixed 2000 2>/dev/null || true
 fi
 
 EOF
@@ -72,6 +78,9 @@ ip link set "\$AP_IF" up 2>/dev/null || true
 ip addr flush dev "\$AP_IF" 2>/dev/null || true
 ip addr add "\${AP_IP}/24" dev "\$AP_IF" 2>/dev/null || true
 sysctl -w net.ipv4.ip_forward=1 > /dev/null || true
+
+# AP TX power 최대 — hostapd가 인터페이스 가져간 뒤에도 적용되도록 잠시 대기 후 설정
+( sleep 5; iw dev "\$AP_IF" set txpower fixed 2000 2>/dev/null || true ) &
 EOF
 
     # --- 다운스트림 라우트 (HOP < 3) ---
