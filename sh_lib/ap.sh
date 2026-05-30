@@ -13,18 +13,35 @@ driver=nl80211
 
 ssid=${SSID}
 
+country_code=KR
+ieee80211d=1
+
 hw_mode=g
 channel=${CHANNEL}
 ieee80211n=1
+# HT20 + long GI + RX-STBC: 협대역으로 수신감도 우선 (속도 < 거리)
+ht_capab=[RX-STBC1]
 wmm_enabled=1
 auth_algs=1
+
+# 베이직 레이트를 DSSS 1/2/5.5/11 Mbps로 낮춰 비콘/관리 프레임 도달거리 확장
+basic_rates=10 20 55 110
+supported_rates=10 20 55 110 60 90 120 180 240 360 480 540
+
+# 약신호/hidden node 환경에서 충돌·재전송 감소
+rts_threshold=256
+fragm_threshold=2346
+
+# 비콘 오버헤드 감소
+beacon_int=200
+dtim_period=2
 
 wpa=2
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 wpa_passphrase=${WPA_PASS}
 EOF
-    echo "    완료: interface=${AP_IF}, ssid=${SSID}, channel=${CHANNEL}"
+    echo "    완료: interface=${AP_IF}, ssid=${SSID}, channel=${CHANNEL} (거리 우선 모드)"
 }
 
 write_dnsmasq_conf() {
